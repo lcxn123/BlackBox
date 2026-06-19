@@ -1,0 +1,45 @@
+{
+    "version": 6,
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 20,
+        "patch": 0
+    },
+    "configurePresets": [
+        {
+            "name": "mingw-gcc",
+            "displayName": "MinGW GCC 15.2",
+            "generator": "MinGW Makefiles",
+            "binaryDir": "${sourceDir}/build",
+            "cacheVariables": {
+                "CMAKE_CXX_COMPILER": {
+                    "type": "FILEPATH",
+                    "value": "C:/msys64/mingw64/bin/g++.exe"
+                },
+                "CMAKE_MAKE_PROGRAM": {
+                    "type": "FILEPATH",
+                    "value": "C:/msys64/mingw64/bin/mingw32-make.exe"
+                },
+                "CMAKE_PREFIX_PATH": {
+                    "type": "PATH",
+                    "value": "C:/msys64/mingw64"
+                },
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            },
+            "environment": {
+                "CC": "C:/msys64/mingw64/bin/gcc.exe",
+                "CXX": "C:/msys64/mingw64/bin/g++.exe",
+                "CFLAGS": "",
+                "CXXFLAGS": "",
+                "PATH": "C:\\msys64\\mingw64\\bin;$penv{PATH}"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "mingw-gcc",
+            "displayName": "Build BlackBox with MinGW GCC",
+            "configurePreset": "mingw-gcc"
+        }
+    ]
+}

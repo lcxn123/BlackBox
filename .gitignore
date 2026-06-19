@@ -1,0 +1,14 @@
+build/
+*.exe
+*.obj
+*.dll
+*.pdb
+
+# Local runtime data
+*.db
+*.db-shm
+*.db-wal
+
+# Local editor / machine-specific configuration
+.vscode/settings.json
+CMakeUserPresets.json
