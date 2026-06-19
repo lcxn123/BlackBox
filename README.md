@@ -83,12 +83,6 @@ Git and should not be committed.
 ctest --test-dir build --output-on-failure
 ```
 
-### Roadmap
-
-- Improve GUI charts and dashboard layout.
-- Add app/category classification.
-- Add packaging for normal Windows installation.
-
 ### License
 
 BlackBox is released under the [MIT License](LICENSE).
@@ -171,12 +165,6 @@ BlackBox 会把本地活动数据存储到 `blackbox.db`。这个文件已经被
 ```powershell
 ctest --test-dir build --output-on-failure
 ```
-
-### 路线图
-
-- 改进 GUI 图表和仪表盘布局。
-- 增加应用/类别分类。
-- 增加 Windows 正常安装包支持。
 
 ### 许可证
 
