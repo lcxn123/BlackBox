@@ -1,14 +1,20 @@
 #include "app_icon.h"
 #include "main_window.h"
 
+#include <QAction>
+#include <QApplication>
+#include <QCloseEvent>
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QMetaObject>
 #include <QPushButton>
 #include <QStatusBar>
+#include <QSystemTrayIcon>
 #include <QTableWidget>
 #include <QTableWidgetItem>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -90,7 +96,7 @@ MainWindow::MainWindow(DatabaseConnection& database)
     today_button_ = new QPushButton("Today", central);
     all_button_ = new QPushButton("All", central);
     refresh_button_ = new QPushButton("Refresh", central);
-    recording_button_ = new QPushButton("Start Recording", central);
+    recording_button_ = new QPushButton("Resume Recording", central);
     today_button_->setObjectName("modeButton");
     all_button_->setObjectName("modeButton");
     refresh_button_->setObjectName("secondaryButton");
@@ -266,10 +272,15 @@ MainWindow::MainWindow(DatabaseConnection& database)
         }
     });
 
+    setup_tray_icon();
     update_mode_buttons();
     update_recording_button();
     update_button_styles();
     refresh();
+
+    QTimer::singleShot(0, this, [this] {
+        start_recording();
+    });
 }
 
 MainWindow::~MainWindow() {
@@ -278,6 +289,21 @@ MainWindow::~MainWindow() {
     if (recorder_thread_.joinable()) {
         recorder_thread_.join();
     }
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+    if (quitting_ || tray_icon_ == nullptr || !tray_icon_->isVisible()) {
+        QMainWindow::closeEvent(event);
+        return;
+    }
+
+    event->ignore();
+    hide();
+    tray_icon_->showMessage(
+        "BlackBox",
+        "BlackBox is still running in the system tray.",
+        QSystemTrayIcon::Information,
+        2500);
 }
 
 void MainWindow::refresh() {
@@ -335,6 +361,60 @@ void MainWindow::update_mode_buttons() {
     all_button_->setEnabled(today_only_);
 }
 
+void MainWindow::setup_tray_icon() {
+    if (!QSystemTrayIcon::isSystemTrayAvailable()) {
+        statusBar()->showMessage("System tray is not available");
+        return;
+    }
+
+    tray_menu_ = new QMenu(this);
+    show_action_ = tray_menu_->addAction("Show BlackBox");
+    recording_action_ = tray_menu_->addAction("Resume Recording");
+    tray_menu_->addSeparator();
+    quit_action_ = tray_menu_->addAction("Quit");
+
+    tray_icon_ = new QSystemTrayIcon(make_app_icon(), this);
+    tray_icon_->setContextMenu(tray_menu_);
+    tray_icon_->setToolTip("BlackBox");
+
+    connect(show_action_, &QAction::triggered, this, [this] {
+        show_main_window();
+    });
+
+    connect(recording_action_, &QAction::triggered, this, [this] {
+        if (recording_) {
+            stop_recording();
+        } else {
+            start_recording();
+        }
+    });
+
+    connect(quit_action_, &QAction::triggered, this, [this] {
+        quit_from_tray();
+    });
+
+    connect(
+        tray_icon_,
+        &QSystemTrayIcon::activated,
+        this,
+        [this](QSystemTrayIcon::ActivationReason reason) {
+            if (reason == QSystemTrayIcon::Trigger
+                || reason == QSystemTrayIcon::DoubleClick) {
+                show_main_window();
+            }
+        });
+
+    tray_icon_->show();
+    update_tray_actions();
+}
+
+void MainWindow::show_main_window() {
+    show();
+    raise();
+    activateWindow();
+    refresh();
+}
+
 void MainWindow::start_recording() {
     if (recording_) {
         return;
@@ -347,7 +427,7 @@ void MainWindow::start_recording() {
     should_continue_.store(true);
     recording_ = true;
     update_recording_button();
-    statusBar()->showMessage("Recording started");
+    statusBar()->showMessage("Recording active");
 
     recorder_thread_ = std::thread([this] {
         DatabaseConnection recorder_database;
@@ -382,16 +462,28 @@ void MainWindow::stop_recording() {
     update_recording_button();
 
     if (was_recording) {
-        statusBar()->showMessage("Recording stopped");
+        statusBar()->showMessage("Recording paused");
         refresh();
     }
 }
 
+void MainWindow::quit_from_tray() {
+    quitting_ = true;
+    stop_recording();
+
+    if (tray_icon_ != nullptr) {
+        tray_icon_->hide();
+    }
+
+    QApplication::quit();
+}
+
 void MainWindow::update_recording_button() {
-    recording_button_->setText(recording_ ? "Stop Recording" : "Start Recording");
+    recording_button_->setText(recording_ ? "Pause Recording" : "Resume Recording");
     recording_button_->setProperty("recording", recording_);
     recording_button_->style()->unpolish(recording_button_);
     recording_button_->style()->polish(recording_button_);
+    update_tray_actions();
 }
 
 void MainWindow::update_button_styles() {
@@ -401,5 +493,15 @@ void MainWindow::update_button_styles() {
     for (QPushButton* button : {today_button_, all_button_}) {
         button->style()->unpolish(button);
         button->style()->polish(button);
+    }
+}
+
+void MainWindow::update_tray_actions() {
+    if (recording_action_ != nullptr) {
+        recording_action_->setText(recording_ ? "Pause Recording" : "Resume Recording");
+    }
+
+    if (tray_icon_ != nullptr) {
+        tray_icon_->setToolTip(recording_ ? "BlackBox - Recording" : "BlackBox - Paused");
     }
 }
