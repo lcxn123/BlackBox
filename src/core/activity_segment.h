@@ -4,7 +4,7 @@
 #include <string>
 #include <windows.h>
 #include <cstdint>
-#include "active_window.h"
+#include "platform/windows/active_window.h"
 
 struct ActivitySegment {
     std::chrono::system_clock::time_point started_at;

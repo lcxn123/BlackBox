@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "activity_segment.h"
+#include "core/activity_segment.h"
 
 struct DatabaseConnection {
     sqlite3* handle = nullptr;

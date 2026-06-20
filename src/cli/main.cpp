@@ -1,6 +1,6 @@
-#include "database.h"
-#include "recorder.h"
-#include "reporter.h"
+#include "recorder/recorder.h"
+#include "reporting/reporter.h"
+#include "storage/database.h"
 
 #include <algorithm>
 #include <atomic>

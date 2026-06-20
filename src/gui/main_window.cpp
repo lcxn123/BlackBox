@@ -1,5 +1,7 @@
-#include "app_icon.h"
-#include "main_window.h"
+#include "gui/app_icon.h"
+#include "gui/main_window.h"
+#include "gui/settings_dialog.h"
+#include "gui/usage_report.h"
 
 #include <QAction>
 #include <QApplication>
@@ -8,7 +10,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMenu>
-#include <QMetaObject>
 #include <QPushButton>
 #include <QStatusBar>
 #include <QSystemTrayIcon>
@@ -18,76 +19,31 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-#include <algorithm>
-#include <chrono>
-#include <cstdint>
-#include <ctime>
-#include <numeric>
 #include <string>
 #include <utility>
-#include <vector>
 
-namespace {
-
-std::int64_t to_epoch_ms(std::chrono::system_clock::time_point time) {
-    return std::chrono::duration_cast<std::chrono::milliseconds>(
-        time.time_since_epoch()).count();
-}
-
-std::pair<std::int64_t, std::int64_t> today_range_ms() {
-    const auto now = std::chrono::system_clock::now();
-    const std::time_t now_time = std::chrono::system_clock::to_time_t(now);
-
-    std::tm local_time{};
-    localtime_s(&local_time, &now_time);
-
-    std::tm start_of_day = local_time;
-    start_of_day.tm_hour = 0;
-    start_of_day.tm_min = 0;
-    start_of_day.tm_sec = 0;
-    start_of_day.tm_isdst = -1;
-
-    std::tm start_of_tomorrow = start_of_day;
-    start_of_tomorrow.tm_mday += 1;
-    start_of_tomorrow.tm_isdst = -1;
-
-    const std::time_t start_time = std::mktime(&start_of_day);
-    const std::time_t end_time = std::mktime(&start_of_tomorrow);
-
-    return {
-        to_epoch_ms(std::chrono::system_clock::from_time_t(start_time)),
-        to_epoch_ms(std::chrono::system_clock::from_time_t(end_time))
-    };
-}
-
-QString format_duration(std::int64_t duration_ms) {
-    const std::int64_t total_seconds = duration_ms / 1000;
-    const std::int64_t hours = total_seconds / 3600;
-    const std::int64_t minutes = (total_seconds % 3600) / 60;
-    const std::int64_t seconds = total_seconds % 60;
-
-    return QString("%1h %2m %3s").arg(hours).arg(minutes).arg(seconds);
-}
-
-}  // namespace
-
-MainWindow::MainWindow(DatabaseConnection& database)
-    : database_(database)
+MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
+    : database_(database),
+      settings_(std::move(settings)),
+      recording_controller_(settings_)
 {
-    setWindowTitle("BlackBox");
+    setWindowTitle("BlackBox - Time Recorder");
     setWindowIcon(make_app_icon());
-    resize(880, 600);
+    resize(940, 640);
 
     QWidget* central = new QWidget(this);
     central->setObjectName("root");
     QVBoxLayout* root_layout = new QVBoxLayout(central);
-    root_layout->setContentsMargins(24, 20, 24, 20);
-    root_layout->setSpacing(14);
+    root_layout->setContentsMargins(28, 24, 28, 22);
+    root_layout->setSpacing(16);
 
     title_label_ = new QLabel("BlackBox", central);
     title_label_->setObjectName("titleLabel");
     period_label_ = new QLabel("Today", central);
     period_label_->setObjectName("periodLabel");
+    status_label_ = new QLabel("Paused", central);
+    status_label_->setObjectName("statusLabel");
+    status_label_->setProperty("recording", false);
     total_label_ = new QLabel("0h 0m 0s", central);
     total_label_->setObjectName("totalLabel");
     count_label_ = new QLabel("0 apps", central);
@@ -95,12 +51,19 @@ MainWindow::MainWindow(DatabaseConnection& database)
 
     today_button_ = new QPushButton("Today", central);
     all_button_ = new QPushButton("All", central);
+    settings_button_ = new QPushButton("Settings", central);
     refresh_button_ = new QPushButton("Refresh", central);
     recording_button_ = new QPushButton("Resume Recording", central);
     today_button_->setObjectName("modeButton");
     all_button_->setObjectName("modeButton");
+    settings_button_->setObjectName("secondaryButton");
     refresh_button_->setObjectName("secondaryButton");
     recording_button_->setObjectName("recordingButton");
+    today_button_->setMinimumWidth(76);
+    all_button_->setMinimumWidth(64);
+    settings_button_->setMinimumWidth(92);
+    refresh_button_->setMinimumWidth(92);
+    recording_button_->setMinimumWidth(150);
 
     QVBoxLayout* heading_layout = new QVBoxLayout();
     heading_layout->setSpacing(2);
@@ -108,12 +71,14 @@ MainWindow::MainWindow(DatabaseConnection& database)
     heading_layout->addWidget(period_label_);
 
     QHBoxLayout* header_layout = new QHBoxLayout();
+    header_layout->setSpacing(10);
     header_layout->addLayout(heading_layout);
     header_layout->addStretch();
+    header_layout->addWidget(status_label_);
     header_layout->addWidget(recording_button_);
 
     QHBoxLayout* summary_layout = new QHBoxLayout();
-    summary_layout->setSpacing(10);
+    summary_layout->setSpacing(12);
     summary_layout->addWidget(total_label_);
     summary_layout->addWidget(count_label_);
     summary_layout->addStretch();
@@ -123,6 +88,7 @@ MainWindow::MainWindow(DatabaseConnection& database)
     filter_layout->addWidget(today_button_);
     filter_layout->addWidget(all_button_);
     filter_layout->addStretch();
+    filter_layout->addWidget(settings_button_);
     filter_layout->addWidget(refresh_button_);
 
     table_ = new QTableWidget(0, 2, central);
@@ -130,12 +96,15 @@ MainWindow::MainWindow(DatabaseConnection& database)
     table_->horizontalHeader()->setStretchLastSection(true);
     table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    table_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     table_->verticalHeader()->setVisible(false);
+    table_->verticalHeader()->setDefaultSectionSize(42);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->setSelectionBehavior(QAbstractItemView::SelectRows);
     table_->setAlternatingRowColors(true);
     table_->setShowGrid(false);
     table_->setFocusPolicy(Qt::NoFocus);
+    table_->setWordWrap(false);
 
     root_layout->addLayout(header_layout);
     root_layout->addLayout(summary_layout);
@@ -145,76 +114,102 @@ MainWindow::MainWindow(DatabaseConnection& database)
     statusBar()->setSizeGripEnabled(false);
 
     setStyleSheet(R"qss(
+        QMainWindow {
+            background: #f7f8fb;
+        }
+
         QWidget#root {
-            background: #f4f6f8;
-            color: #1f2933;
+            background: #f7f8fb;
+            color: #1f2937;
             font-family: "Segoe UI";
             font-size: 14px;
         }
 
         QLabel#titleLabel {
-            font-size: 24px;
-            font-weight: 650;
-            color: #151b23;
+            font-size: 26px;
+            font-weight: 700;
+            color: #111827;
         }
 
         QLabel#periodLabel {
-            color: #697586;
+            color: #667085;
             font-size: 13px;
+        }
+
+        QLabel#statusLabel {
+            background: #fff7ed;
+            border: 1px solid #fed7aa;
+            border-radius: 6px;
+            color: #9a3412;
+            font-weight: 650;
+            padding: 8px 12px;
+        }
+
+        QLabel#statusLabel[recording="true"] {
+            background: #ecfdf3;
+            border-color: #abefc6;
+            color: #067647;
         }
 
         QLabel#totalLabel {
             background: #ffffff;
-            border: 1px solid #d9e2ec;
+            border: 1px solid #d0d7de;
             border-radius: 6px;
-            padding: 10px 14px;
-            font-size: 18px;
-            font-weight: 650;
-            color: #102a43;
+            padding: 12px 16px;
+            font-size: 19px;
+            font-weight: 700;
+            color: #111827;
         }
 
         QLabel#countLabel {
-            background: #eef6f3;
-            border: 1px solid #cfe3dc;
+            background: #f3f7f6;
+            border: 1px solid #cfded8;
             border-radius: 6px;
-            padding: 10px 14px;
-            color: #315c50;
-            font-weight: 600;
+            padding: 12px 16px;
+            color: #365a50;
+            font-weight: 650;
         }
 
         QPushButton {
-            border: 1px solid #cbd5e1;
+            border: 1px solid #d0d7de;
             border-radius: 6px;
             background: #ffffff;
-            padding: 7px 13px;
-            min-height: 22px;
-            color: #243b53;
+            padding: 8px 14px;
+            min-height: 28px;
+            color: #344054;
+            font-weight: 600;
         }
 
         QPushButton:hover {
-            background: #f8fafc;
-            border-color: #94a3b8;
+            background: #f9fafb;
+            border-color: #98a2b3;
+        }
+
+        QPushButton:disabled {
+            color: #98a2b3;
+            background: #f2f4f7;
+            border-color: #eaecf0;
         }
 
         QPushButton#recordingButton {
-            background: #1f7a5c;
-            border-color: #1f7a5c;
+            background: #067647;
+            border-color: #067647;
             color: #ffffff;
-            font-weight: 650;
+            font-weight: 700;
             padding-left: 16px;
             padding-right: 16px;
         }
 
         QPushButton#recordingButton[recording="true"] {
-            background: #b42318;
-            border-color: #b42318;
+            background: #b54708;
+            border-color: #b54708;
         }
 
         QPushButton#modeButton[selected="true"] {
-            background: #253858;
-            border-color: #253858;
+            background: #344054;
+            border-color: #344054;
             color: #ffffff;
-            font-weight: 650;
+            font-weight: 700;
         }
 
         QPushButton#modeButton[selected="false"] {
@@ -227,31 +222,32 @@ MainWindow::MainWindow(DatabaseConnection& database)
 
         QTableWidget {
             background: #ffffff;
-            alternate-background-color: #f8fafc;
-            border: 1px solid #d9e2ec;
+            alternate-background-color: #f9fafb;
+            border: 1px solid #d0d7de;
             border-radius: 6px;
-            selection-background-color: #d7e8ff;
-            selection-color: #102a43;
+            selection-background-color: #e7f0ff;
+            selection-color: #111827;
             gridline-color: transparent;
         }
 
         QTableWidget::item {
-            padding: 8px;
+            padding: 10px;
             border: none;
         }
 
         QHeaderView::section {
-            background: #e9eef5;
-            color: #334e68;
+            background: #f2f4f7;
+            color: #475467;
             border: none;
-            border-bottom: 1px solid #d9e2ec;
-            padding: 9px 8px;
-            font-weight: 650;
+            border-bottom: 1px solid #d0d7de;
+            padding: 10px;
+            font-weight: 700;
         }
 
         QStatusBar {
-            background: #f4f6f8;
-            color: #697586;
+            background: #f7f8fb;
+            color: #667085;
+            padding-left: 4px;
         }
     )qss");
 
@@ -264,8 +260,11 @@ MainWindow::MainWindow(DatabaseConnection& database)
     connect(refresh_button_, &QPushButton::clicked, this, [this] {
         refresh();
     });
+    connect(settings_button_, &QPushButton::clicked, this, [this] {
+        open_settings();
+    });
     connect(recording_button_, &QPushButton::clicked, this, [this] {
-        if (recording_) {
+        if (recording_controller_.is_recording()) {
             stop_recording();
         } else {
             start_recording();
@@ -273,6 +272,7 @@ MainWindow::MainWindow(DatabaseConnection& database)
     });
 
     setup_tray_icon();
+    setup_refresh_timer();
     update_mode_buttons();
     update_recording_button();
     update_button_styles();
@@ -283,13 +283,7 @@ MainWindow::MainWindow(DatabaseConnection& database)
     });
 }
 
-MainWindow::~MainWindow() {
-    should_continue_.store(false);
-
-    if (recorder_thread_.joinable()) {
-        recorder_thread_.join();
-    }
-}
+MainWindow::~MainWindow() = default;
 
 void MainWindow::closeEvent(QCloseEvent* event) {
     if (quitting_ || tray_icon_ == nullptr || !tray_icon_->isVisible()) {
@@ -306,42 +300,33 @@ void MainWindow::closeEvent(QCloseEvent* event) {
         2500);
 }
 
-void MainWindow::refresh() {
-    std::vector<AppUsageSummary> rows;
+void MainWindow::refresh(bool update_status) {
+    const UsageReport report = load_usage_report(database_, today_only_);
 
-    if (today_only_) {
-        const auto [start_ms, end_ms] = today_range_ms();
-        rows = load_usage_summary_between(database_, start_ms, end_ms);
-        statusBar()->showMessage("Showing today's usage");
-    } else {
-        rows = load_usage_summary(database_);
-        statusBar()->showMessage("Showing all recorded usage");
+    if (update_status) {
+        statusBar()->showMessage(
+            today_only_ ? "Showing today's usage" : "Showing all recorded usage");
     }
 
-    table_->setRowCount(static_cast<int>(rows.size()));
-    const std::int64_t total_duration_ms = std::accumulate(
-        rows.begin(),
-        rows.end(),
-        std::int64_t{0},
-        [](std::int64_t total, const AppUsageSummary& row) {
-            return total + row.duration_ms;
-        });
+    table_->setRowCount(static_cast<int>(report.rows.size()));
+    period_label_->setText(QString::fromStdString(report.period_label));
+    total_label_->setText(QString::fromStdString(
+        format_duration_text(report.total_duration_ms)));
+    count_label_->setText(QString("%1 apps").arg(report.rows.size()));
 
-    period_label_->setText(today_only_ ? "Today" : "All recorded time");
-    total_label_->setText(format_duration(total_duration_ms));
-    count_label_->setText(QString("%1 apps").arg(rows.size()));
-
-    for (int row_index = 0; row_index < static_cast<int>(rows.size()); ++row_index) {
-        const AppUsageSummary& row = rows[static_cast<std::size_t>(row_index)];
+    for (int row_index = 0; row_index < static_cast<int>(report.rows.size()); ++row_index) {
+        const AppUsageSummary& row = report.rows[static_cast<std::size_t>(row_index)];
 
         table_->setItem(
             row_index,
             0,
-            new QTableWidgetItem(QString::fromStdString(row.app_name)));
+            new QTableWidgetItem(QString::fromStdString(
+                display_app_name_text(row.app_name))));
         table_->setItem(
             row_index,
             1,
-            new QTableWidgetItem(format_duration(row.duration_ms)));
+            new QTableWidgetItem(QString::fromStdString(
+                format_duration_text(row.duration_ms))));
     }
 }
 
@@ -361,6 +346,19 @@ void MainWindow::update_mode_buttons() {
     all_button_->setEnabled(today_only_);
 }
 
+void MainWindow::setup_refresh_timer() {
+    refresh_timer_ = new QTimer(this);
+    refresh_timer_->setInterval(settings_.gui_refresh_interval_ms);
+
+    connect(refresh_timer_, &QTimer::timeout, this, [this] {
+        if (isVisible()) {
+            refresh(false);
+        }
+    });
+
+    refresh_timer_->start();
+}
+
 void MainWindow::setup_tray_icon() {
     if (!QSystemTrayIcon::isSystemTrayAvailable()) {
         statusBar()->showMessage("System tray is not available");
@@ -369,6 +367,7 @@ void MainWindow::setup_tray_icon() {
 
     tray_menu_ = new QMenu(this);
     show_action_ = tray_menu_->addAction("Show BlackBox");
+    settings_action_ = tray_menu_->addAction("Settings");
     recording_action_ = tray_menu_->addAction("Resume Recording");
     tray_menu_->addSeparator();
     quit_action_ = tray_menu_->addAction("Quit");
@@ -381,8 +380,12 @@ void MainWindow::setup_tray_icon() {
         show_main_window();
     });
 
+    connect(settings_action_, &QAction::triggered, this, [this] {
+        open_settings();
+    });
+
     connect(recording_action_, &QAction::triggered, this, [this] {
-        if (recording_) {
+        if (recording_controller_.is_recording()) {
             stop_recording();
         } else {
             start_recording();
@@ -415,50 +418,52 @@ void MainWindow::show_main_window() {
     refresh();
 }
 
-void MainWindow::start_recording() {
-    if (recording_) {
+void MainWindow::open_settings() {
+    SettingsDialog dialog(settings_, this);
+    if (dialog.exec() != QDialog::Accepted) {
         return;
     }
 
-    if (recorder_thread_.joinable()) {
-        recorder_thread_.join();
+    const bool was_recording = recording_controller_.is_recording();
+
+    settings_ = dialog.settings();
+    const bool saved = save_app_settings(settings_);
+    recording_controller_.set_settings(settings_);
+
+    if (refresh_timer_ != nullptr) {
+        refresh_timer_->setInterval(settings_.gui_refresh_interval_ms);
     }
 
-    should_continue_.store(true);
-    recording_ = true;
+    update_recording_button();
+
+    if (was_recording && !recording_controller_.start()) {
+        update_recording_button();
+        statusBar()->showMessage("Failed to restart recording");
+        return;
+    }
+
+    update_recording_button();
+    statusBar()->showMessage(saved ? "Settings saved" : "Failed to save settings");
+}
+
+void MainWindow::start_recording() {
+    if (recording_controller_.is_recording()) {
+        return;
+    }
+
+    if (!recording_controller_.start()) {
+        update_recording_button();
+        statusBar()->showMessage("Failed to start recording");
+        return;
+    }
+
     update_recording_button();
     statusBar()->showMessage("Recording active");
-
-    recorder_thread_ = std::thread([this] {
-        DatabaseConnection recorder_database;
-
-        if (!open_database(recorder_database, "blackbox.db")
-            || !create_activity_segments_table(recorder_database)) {
-            should_continue_.store(false);
-
-            QMetaObject::invokeMethod(this, [this] {
-                recording_ = false;
-                update_recording_button();
-                statusBar()->showMessage("Failed to start recording");
-            }, Qt::QueuedConnection);
-
-            return;
-        }
-
-        run_recorder(recorder_database, recorder_config_, should_continue_);
-    });
 }
 
 void MainWindow::stop_recording() {
-    const bool was_recording = recording_;
-
-    should_continue_.store(false);
-
-    if (recorder_thread_.joinable()) {
-        recorder_thread_.join();
-    }
-
-    recording_ = false;
+    const bool was_recording = recording_controller_.is_recording();
+    recording_controller_.stop();
     update_recording_button();
 
     if (was_recording) {
@@ -479,10 +484,18 @@ void MainWindow::quit_from_tray() {
 }
 
 void MainWindow::update_recording_button() {
-    recording_button_->setText(recording_ ? "Pause Recording" : "Resume Recording");
-    recording_button_->setProperty("recording", recording_);
+    const bool recording = recording_controller_.is_recording();
+
+    recording_button_->setText(recording ? "Pause Recording" : "Resume Recording");
+    recording_button_->setProperty("recording", recording);
     recording_button_->style()->unpolish(recording_button_);
     recording_button_->style()->polish(recording_button_);
+
+    status_label_->setText(recording ? "Recording" : "Paused");
+    status_label_->setProperty("recording", recording);
+    status_label_->style()->unpolish(status_label_);
+    status_label_->style()->polish(status_label_);
+
     update_tray_actions();
 }
 
@@ -497,11 +510,13 @@ void MainWindow::update_button_styles() {
 }
 
 void MainWindow::update_tray_actions() {
+    const bool recording = recording_controller_.is_recording();
+
     if (recording_action_ != nullptr) {
-        recording_action_->setText(recording_ ? "Pause Recording" : "Resume Recording");
+        recording_action_->setText(recording ? "Pause Recording" : "Resume Recording");
     }
 
     if (tray_icon_ != nullptr) {
-        tray_icon_->setToolTip(recording_ ? "BlackBox - Recording" : "BlackBox - Paused");
+        tray_icon_->setToolTip(recording ? "BlackBox - Recording" : "BlackBox - Paused");
     }
 }

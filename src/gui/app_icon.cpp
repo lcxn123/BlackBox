@@ -1,4 +1,4 @@
-#include "app_icon.h"
+#include "gui/app_icon.h"
 
 #include <QBrush>
 #include <QColor>

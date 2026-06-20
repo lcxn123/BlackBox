@@ -1,6 +1,7 @@
-#include "app_icon.h"
-#include "database.h"
-#include "main_window.h"
+#include "gui/app_icon.h"
+#include "gui/main_window.h"
+#include "settings/app_settings.h"
+#include "storage/database.h"
 
 #include <QApplication>
 #include <QMessageBox>
@@ -10,9 +11,13 @@ int main(int argc, char* argv[]) {
     app.setWindowIcon(make_app_icon());
 
     DatabaseConnection database;
+    const AppSettings settings = load_app_settings();
 
-    if (!open_database(database, "blackbox.db")) {
-        QMessageBox::critical(nullptr, "BlackBox", "Failed to open blackbox.db.");
+    if (!open_database(database, settings.database_path)) {
+        QMessageBox::critical(
+            nullptr,
+            "BlackBox",
+            "Failed to open " + QString::fromStdString(settings.database_path) + ".");
         return 1;
     }
 
@@ -24,7 +29,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    MainWindow window(database);
+    MainWindow window(database, settings);
     window.show();
 
     return app.exec();

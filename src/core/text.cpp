@@ -1,4 +1,4 @@
-#include "text.h"
+#include "core/text.h"
 
 #include <windows.h>
 

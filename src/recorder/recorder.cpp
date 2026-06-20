@@ -1,7 +1,8 @@
-#include "recorder.h"
-#include "active_window.h"
-#include "activity_segment.h"
-#include "text.h"
+#include "recorder/recorder.h"
+
+#include "core/activity_segment.h"
+#include "core/text.h"
+#include "platform/windows/active_window.h"
 
 #include <chrono>
 #include <ctime>
