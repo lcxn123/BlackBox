@@ -1,6 +1,6 @@
 #pragma once
 
-#include "database.h"
+#include "storage/database.h"
 #include <atomic>
 
 struct RecorderConfig {

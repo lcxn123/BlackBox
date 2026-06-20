@@ -1,7 +1,7 @@
 #include <chrono>
 #include <cassert>
 
-#include "activity_segment.h"
+#include "core/activity_segment.h"
 
 
 int main() {

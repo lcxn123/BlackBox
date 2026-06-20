@@ -4,8 +4,8 @@
 #include <iostream>
 #include <string>
 
-#include "text.h"
-#include "database.h"
+#include "core/text.h"
+#include "storage/database.h"
 
 namespace{
     const std::string create_activity_segment_sql = 

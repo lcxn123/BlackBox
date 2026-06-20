@@ -1,6 +1,6 @@
 #include <chrono>
 #include <cstdint>
-#include "activity_segment.h"
+#include "core/activity_segment.h"
 
 
 ActivitySegment begin_activity_segment(
