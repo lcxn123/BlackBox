@@ -1,5 +1,7 @@
 # BlackBox
 
+[![Windows CI](https://github.com/lcxn123/BlackBox/actions/workflows/windows-ci.yml/badge.svg)](https://github.com/lcxn123/BlackBox/actions/workflows/windows-ci.yml)
+
 Languages: [English](#english) | [中文](#中文)
 
 ## English
