@@ -12,8 +12,10 @@ class QLabel;
 class QMenu;
 class QPushButton;
 class QSystemTrayIcon;
+class QTabWidget;
 class QTableWidget;
 class QTimer;
+class QToolButton;
 
 class MainWindow : public QMainWindow {
 public:
@@ -44,22 +46,23 @@ private:
     bool today_only_ = true;
     bool quitting_ = false;
 
-    QLabel* title_label_ = nullptr;
     QLabel* period_label_ = nullptr;
     QLabel* status_label_ = nullptr;
     QLabel* total_label_ = nullptr;
     QLabel* count_label_ = nullptr;
     QPushButton* today_button_ = nullptr;
     QPushButton* all_button_ = nullptr;
-    QPushButton* settings_button_ = nullptr;
-    QPushButton* refresh_button_ = nullptr;
     QPushButton* recording_button_ = nullptr;
+    QToolButton* settings_button_ = nullptr;
+    QToolButton* refresh_button_ = nullptr;
     QSystemTrayIcon* tray_icon_ = nullptr;
     QMenu* tray_menu_ = nullptr;
     QAction* show_action_ = nullptr;
     QAction* settings_action_ = nullptr;
     QAction* recording_action_ = nullptr;
     QAction* quit_action_ = nullptr;
-    QTableWidget* table_ = nullptr;
+    QTabWidget* content_tabs_ = nullptr;
+    QTableWidget* summary_table_ = nullptr;
+    QTableWidget* timeline_table_ = nullptr;
     QTimer* refresh_timer_ = nullptr;
 };

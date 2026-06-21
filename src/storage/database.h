@@ -24,6 +24,14 @@ struct AppUsageSummary {
     std::int64_t duration_ms = 0;
 };
 
+struct ActivityTimelineEntry {
+    std::int64_t started_at_ms = 0;
+    std::int64_t ended_at_ms = 0;
+    std::string app_name;
+    std::string window_title;
+    bool idle = false;
+};
+
 std::vector<AppUsageSummary> load_usage_summary(
     DatabaseConnection& connection);
 
@@ -32,6 +40,13 @@ std::vector<AppUsageSummary> load_usage_summary_between(
     std::int64_t start_ms,
     std::int64_t end_ms);
 
+std::vector<ActivityTimelineEntry> load_activity_timeline(
+    DatabaseConnection& connection);
+
+std::vector<ActivityTimelineEntry> load_activity_timeline_between(
+    DatabaseConnection& connection,
+    std::int64_t start_ms,
+    std::int64_t end_ms);
 
 bool open_database(DatabaseConnection& connection, const std::string& path);
 

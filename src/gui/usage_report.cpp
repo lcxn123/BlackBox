@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cctype>
 #include <ctime>
+#include <iomanip>
 #include <numeric>
 #include <sstream>
 #include <utility>
@@ -60,6 +61,34 @@ bool ends_with_exe(const std::string& text) {
         });
 }
 
+std::tm local_time_from_epoch_ms(std::int64_t epoch_ms) {
+    const std::time_t time = static_cast<std::time_t>(epoch_ms / 1000);
+    std::tm local_time{};
+    localtime_s(&local_time, &time);
+    return local_time;
+}
+
+bool same_local_day(std::int64_t left_ms, std::int64_t right_ms) {
+    const std::tm left = local_time_from_epoch_ms(left_ms);
+    const std::tm right = local_time_from_epoch_ms(right_ms);
+
+    return left.tm_year == right.tm_year
+        && left.tm_yday == right.tm_yday;
+}
+
+std::string format_time_text(std::int64_t epoch_ms, bool include_date) {
+    const std::tm local_time = local_time_from_epoch_ms(epoch_ms);
+    std::ostringstream output;
+
+    if (include_date) {
+        output << std::put_time(&local_time, "%Y-%m-%d %H:%M");
+    } else {
+        output << std::put_time(&local_time, "%H:%M");
+    }
+
+    return output.str();
+}
+
 }  // namespace
 
 UsageReport load_usage_report(DatabaseConnection& database, bool today_only) {
@@ -68,14 +97,16 @@ UsageReport load_usage_report(DatabaseConnection& database, bool today_only) {
 
     if (today_only) {
         const auto [start_ms, end_ms] = today_range_ms();
-        report.rows = load_usage_summary_between(database, start_ms, end_ms);
+        report.summary_rows = load_usage_summary_between(database, start_ms, end_ms);
+        report.timeline_rows = load_activity_timeline_between(database, start_ms, end_ms);
     } else {
-        report.rows = load_usage_summary(database);
+        report.summary_rows = load_usage_summary(database);
+        report.timeline_rows = load_activity_timeline(database);
     }
 
     report.total_duration_ms = std::accumulate(
-        report.rows.begin(),
-        report.rows.end(),
+        report.summary_rows.begin(),
+        report.summary_rows.end(),
         std::int64_t{0},
         [](std::int64_t total, const AppUsageSummary& row) {
             return total + row.duration_ms;
@@ -93,6 +124,19 @@ std::string format_duration_text(std::int64_t duration_ms) {
     std::ostringstream output;
     output << hours << "h " << minutes << "m " << seconds << "s";
     return output.str();
+}
+
+std::string format_timeline_range_text(
+    std::int64_t started_at_ms,
+    std::int64_t ended_at_ms,
+    bool include_date)
+{
+    const bool end_needs_date = include_date
+        || !same_local_day(started_at_ms, ended_at_ms);
+
+    return format_time_text(started_at_ms, include_date)
+        + " - "
+        + format_time_text(ended_at_ms, end_needs_date);
 }
 
 std::string display_app_name_text(const std::string& app_name) {
