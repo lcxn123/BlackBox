@@ -44,15 +44,32 @@ foreach ($doc in @("README.md", "LICENSE", "LICENSE.txt")) {
     }
 }
 
-$deployTool = Join-Path $MsysBin "windeployqt6.exe"
-if (!(Test-Path $deployTool)) {
-    $deployTool = Join-Path $MsysBin "windeployqt-qt6.exe"
-}
-if (!(Test-Path $deployTool)) {
-    throw "Could not find windeployqt6.exe or windeployqt-qt6.exe in $MsysBin"
+$env:PATH = "$MsysBin;$env:PATH"
+
+$deployTool = $null
+foreach ($toolName in @("windeployqt6.exe", "windeployqt-qt6.exe", "windeployqt.exe")) {
+    $candidate = Join-Path $MsysBin $toolName
+    if (Test-Path $candidate) {
+        $deployTool = $candidate
+        break
+    }
+
+    $pathCandidate = Get-Command $toolName -ErrorAction SilentlyContinue
+    if ($pathCandidate -ne $null) {
+        $deployTool = $pathCandidate.Source
+        break
+    }
 }
 
-$env:PATH = "$MsysBin;$env:PATH"
+if ($deployTool -eq $null) {
+    Get-ChildItem -Path $MsysBin -Filter "*deployqt*.exe" -ErrorAction SilentlyContinue |
+        Select-Object Name, FullName |
+        Format-Table | Out-String | Write-Host
+
+    throw "Could not find windeployqt in $MsysBin or PATH"
+}
+
+Write-Host "Using Qt deployment tool: $deployTool"
 
 & $deployTool --release --no-translations (Join-Path $packageDir "BlackBox.exe")
 if ($LASTEXITCODE -ne 0) {
