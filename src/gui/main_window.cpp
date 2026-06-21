@@ -13,12 +13,15 @@
 #include <QPushButton>
 #include <QStatusBar>
 #include <QSystemTrayIcon>
+#include <QTabWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -29,16 +32,14 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
 {
     setWindowTitle("BlackBox - Time Recorder");
     setWindowIcon(make_app_icon());
-    resize(940, 640);
+    resize(900, 600);
 
     QWidget* central = new QWidget(this);
     central->setObjectName("root");
     QVBoxLayout* root_layout = new QVBoxLayout(central);
-    root_layout->setContentsMargins(28, 24, 28, 22);
-    root_layout->setSpacing(16);
+    root_layout->setContentsMargins(26, 22, 26, 18);
+    root_layout->setSpacing(14);
 
-    title_label_ = new QLabel("BlackBox", central);
-    title_label_->setObjectName("titleLabel");
     period_label_ = new QLabel("Today", central);
     period_label_->setObjectName("periodLabel");
     status_label_ = new QLabel("Paused", central);
@@ -51,132 +52,148 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
 
     today_button_ = new QPushButton("Today", central);
     all_button_ = new QPushButton("All", central);
-    settings_button_ = new QPushButton("Settings", central);
-    refresh_button_ = new QPushButton("Refresh", central);
+    refresh_button_ = new QToolButton(central);
+    settings_button_ = new QToolButton(central);
     recording_button_ = new QPushButton("Resume Recording", central);
     today_button_->setObjectName("modeButton");
     all_button_->setObjectName("modeButton");
-    settings_button_->setObjectName("secondaryButton");
-    refresh_button_->setObjectName("secondaryButton");
+    refresh_button_->setObjectName("iconButton");
+    settings_button_->setObjectName("iconButton");
     recording_button_->setObjectName("recordingButton");
-    today_button_->setMinimumWidth(76);
-    all_button_->setMinimumWidth(64);
-    settings_button_->setMinimumWidth(92);
-    refresh_button_->setMinimumWidth(92);
-    recording_button_->setMinimumWidth(150);
-
-    QVBoxLayout* heading_layout = new QVBoxLayout();
-    heading_layout->setSpacing(2);
-    heading_layout->addWidget(title_label_);
-    heading_layout->addWidget(period_label_);
+    refresh_button_->setText("⟳");
+    settings_button_->setText("⚙");
+    refresh_button_->setToolTip("Refresh");
+    settings_button_->setToolTip("Settings");
+    refresh_button_->setFixedSize(34, 34);
+    settings_button_->setFixedSize(34, 34);
+    today_button_->setMinimumWidth(68);
+    all_button_->setMinimumWidth(54);
+    recording_button_->setMinimumWidth(136);
 
     QHBoxLayout* header_layout = new QHBoxLayout();
     header_layout->setSpacing(10);
-    header_layout->addLayout(heading_layout);
+    header_layout->addWidget(period_label_);
     header_layout->addStretch();
+    header_layout->addWidget(refresh_button_);
+    header_layout->addWidget(settings_button_);
     header_layout->addWidget(status_label_);
     header_layout->addWidget(recording_button_);
 
     QHBoxLayout* summary_layout = new QHBoxLayout();
-    summary_layout->setSpacing(12);
+    summary_layout->setSpacing(10);
     summary_layout->addWidget(total_label_);
     summary_layout->addWidget(count_label_);
     summary_layout->addStretch();
 
-    QHBoxLayout* filter_layout = new QHBoxLayout();
-    filter_layout->setSpacing(8);
-    filter_layout->addWidget(today_button_);
-    filter_layout->addWidget(all_button_);
-    filter_layout->addStretch();
-    filter_layout->addWidget(settings_button_);
-    filter_layout->addWidget(refresh_button_);
+    QHBoxLayout* action_layout = new QHBoxLayout();
+    action_layout->setSpacing(8);
+    action_layout->addWidget(today_button_);
+    action_layout->addWidget(all_button_);
 
-    table_ = new QTableWidget(0, 2, central);
-    table_->setHorizontalHeaderLabels({"Application", "Duration"});
-    table_->horizontalHeader()->setStretchLastSection(true);
-    table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
-    table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    table_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-    table_->verticalHeader()->setVisible(false);
-    table_->verticalHeader()->setDefaultSectionSize(42);
-    table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    table_->setSelectionBehavior(QAbstractItemView::SelectRows);
-    table_->setAlternatingRowColors(true);
-    table_->setShowGrid(false);
-    table_->setFocusPolicy(Qt::NoFocus);
-    table_->setWordWrap(false);
+    summary_layout->addLayout(action_layout);
+
+    content_tabs_ = new QTabWidget(central);
+    content_tabs_->setObjectName("contentTabs");
+
+    summary_table_ = new QTableWidget(0, 3, content_tabs_);
+    summary_table_->setHorizontalHeaderLabels({"Application", "Time", "Share"});
+    summary_table_->horizontalHeader()->setStretchLastSection(false);
+    summary_table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    summary_table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    summary_table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    summary_table_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    summary_table_->verticalHeader()->setVisible(false);
+    summary_table_->verticalHeader()->setDefaultSectionSize(44);
+    summary_table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    summary_table_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    summary_table_->setAlternatingRowColors(true);
+    summary_table_->setShowGrid(false);
+    summary_table_->setFocusPolicy(Qt::NoFocus);
+    summary_table_->setWordWrap(false);
+
+    timeline_table_ = new QTableWidget(0, 3, content_tabs_);
+    timeline_table_->setHorizontalHeaderLabels({"Time", "Activity", "Duration"});
+    timeline_table_->horizontalHeader()->setStretchLastSection(false);
+    timeline_table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    timeline_table_->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    timeline_table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    timeline_table_->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    timeline_table_->verticalHeader()->setVisible(false);
+    timeline_table_->verticalHeader()->setDefaultSectionSize(40);
+    timeline_table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    timeline_table_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    timeline_table_->setAlternatingRowColors(true);
+    timeline_table_->setShowGrid(false);
+    timeline_table_->setFocusPolicy(Qt::NoFocus);
+    timeline_table_->setWordWrap(false);
+
+    content_tabs_->addTab(summary_table_, "Overview");
+    content_tabs_->addTab(timeline_table_, "Timeline");
 
     root_layout->addLayout(header_layout);
     root_layout->addLayout(summary_layout);
-    root_layout->addLayout(filter_layout);
-    root_layout->addWidget(table_);
+    root_layout->addWidget(content_tabs_);
     setCentralWidget(central);
     statusBar()->setSizeGripEnabled(false);
 
     setStyleSheet(R"qss(
         QMainWindow {
-            background: #f7f8fb;
+            background: #fafafa;
         }
 
         QWidget#root {
-            background: #f7f8fb;
+            background: #fafafa;
             color: #1f2937;
             font-family: "Segoe UI";
             font-size: 14px;
         }
 
-        QLabel#titleLabel {
-            font-size: 26px;
-            font-weight: 700;
-            color: #111827;
-        }
-
         QLabel#periodLabel {
-            color: #667085;
-            font-size: 13px;
+            color: #111827;
+            font-size: 16px;
+            font-weight: 700;
         }
 
         QLabel#statusLabel {
-            background: #fff7ed;
-            border: 1px solid #fed7aa;
-            border-radius: 6px;
-            color: #9a3412;
+            background: #fff3e8;
+            border: none;
+            border-radius: 5px;
+            color: #9a4a12;
             font-weight: 650;
-            padding: 8px 12px;
+            padding: 6px 10px;
         }
 
         QLabel#statusLabel[recording="true"] {
-            background: #ecfdf3;
-            border-color: #abefc6;
-            color: #067647;
+            background: #e8f7ee;
+            color: #166b3b;
         }
 
         QLabel#totalLabel {
-            background: #ffffff;
-            border: 1px solid #d0d7de;
-            border-radius: 6px;
-            padding: 12px 16px;
-            font-size: 19px;
+            background: transparent;
+            border: none;
+            padding: 2px 0;
+            font-size: 34px;
             font-weight: 700;
             color: #111827;
         }
 
         QLabel#countLabel {
-            background: #f3f7f6;
-            border: 1px solid #cfded8;
-            border-radius: 6px;
-            padding: 12px 16px;
-            color: #365a50;
-            font-weight: 650;
+            background: transparent;
+            border: none;
+            padding: 14px 0 0 4px;
+            color: #7a8493;
+            font-size: 14px;
+            font-weight: 500;
         }
 
         QPushButton {
-            border: 1px solid #d0d7de;
-            border-radius: 6px;
+            border: 1px solid #d9dee7;
+            border-radius: 5px;
             background: #ffffff;
-            padding: 8px 14px;
+            padding: 7px 12px;
             min-height: 28px;
             color: #344054;
+            font-size: 14px;
             font-weight: 600;
         }
 
@@ -192,22 +209,22 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
         }
 
         QPushButton#recordingButton {
-            background: #067647;
-            border-color: #067647;
+            background: #1f7a4d;
+            border-color: #1f7a4d;
             color: #ffffff;
             font-weight: 700;
-            padding-left: 16px;
-            padding-right: 16px;
+            padding-left: 14px;
+            padding-right: 14px;
         }
 
         QPushButton#recordingButton[recording="true"] {
-            background: #b54708;
-            border-color: #b54708;
+            background: #a15c18;
+            border-color: #a15c18;
         }
 
         QPushButton#modeButton[selected="true"] {
-            background: #344054;
-            border-color: #344054;
+            background: #1f2937;
+            border-color: #1f2937;
             color: #ffffff;
             font-weight: 700;
         }
@@ -220,32 +237,79 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
             color: #315c50;
         }
 
+        QToolButton#iconButton {
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 5px;
+            color: #475467;
+            font-size: 19px;
+            font-weight: 600;
+        }
+
+        QToolButton#iconButton:hover {
+            background: #f1f4f7;
+            border-color: #e2e7ef;
+            color: #111827;
+        }
+
+        QToolButton#iconButton:pressed {
+            background: #e8edf3;
+        }
+
+        QTabWidget#contentTabs::pane {
+            border: none;
+            background: #ffffff;
+            top: 0;
+        }
+
+        QTabBar::tab {
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: #7a8493;
+            font-size: 14px;
+            font-weight: 650;
+            min-width: 88px;
+            padding: 9px 4px 10px 4px;
+        }
+
+        QTabBar::tab:selected {
+            border-bottom-color: #111827;
+            color: #111827;
+        }
+
+        QTabBar::tab:!selected:hover {
+            color: #344054;
+        }
+
         QTableWidget {
             background: #ffffff;
-            alternate-background-color: #f9fafb;
-            border: 1px solid #d0d7de;
-            border-radius: 6px;
-            selection-background-color: #e7f0ff;
+            alternate-background-color: #fbfbfc;
+            border: none;
+            border-radius: 0;
+            selection-background-color: #edf4ff;
             selection-color: #111827;
             gridline-color: transparent;
+            font-size: 15px;
         }
 
         QTableWidget::item {
-            padding: 10px;
+            padding: 9px 12px;
             border: none;
         }
 
         QHeaderView::section {
-            background: #f2f4f7;
-            color: #475467;
+            background: #ffffff;
+            color: #8a94a3;
             border: none;
-            border-bottom: 1px solid #d0d7de;
-            padding: 10px;
+            border-bottom: 1px solid #edf0f4;
+            padding: 9px 12px;
+            font-size: 13px;
             font-weight: 700;
         }
 
         QStatusBar {
-            background: #f7f8fb;
+            background: #fafafa;
             color: #667085;
             padding-left: 4px;
         }
@@ -257,10 +321,10 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
     connect(all_button_, &QPushButton::clicked, this, [this] {
         set_today_only(false);
     });
-    connect(refresh_button_, &QPushButton::clicked, this, [this] {
+    connect(refresh_button_, &QToolButton::clicked, this, [this] {
         refresh();
     });
-    connect(settings_button_, &QPushButton::clicked, this, [this] {
+    connect(settings_button_, &QToolButton::clicked, this, [this] {
         open_settings();
     });
     connect(recording_button_, &QPushButton::clicked, this, [this] {
@@ -308,25 +372,60 @@ void MainWindow::refresh(bool update_status) {
             today_only_ ? "Showing today's usage" : "Showing all recorded usage");
     }
 
-    table_->setRowCount(static_cast<int>(report.rows.size()));
+    summary_table_->setRowCount(static_cast<int>(report.summary_rows.size()));
     period_label_->setText(QString::fromStdString(report.period_label));
     total_label_->setText(QString::fromStdString(
         format_duration_text(report.total_duration_ms)));
-    count_label_->setText(QString("%1 apps").arg(report.rows.size()));
+    count_label_->setText(QString("%1 apps / %2 segments")
+        .arg(report.summary_rows.size())
+        .arg(report.timeline_rows.size()));
 
-    for (int row_index = 0; row_index < static_cast<int>(report.rows.size()); ++row_index) {
-        const AppUsageSummary& row = report.rows[static_cast<std::size_t>(row_index)];
+    for (int row_index = 0; row_index < static_cast<int>(report.summary_rows.size()); ++row_index) {
+        const AppUsageSummary& row = report.summary_rows[static_cast<std::size_t>(row_index)];
 
-        table_->setItem(
+        summary_table_->setItem(
             row_index,
             0,
             new QTableWidgetItem(QString::fromStdString(
                 display_app_name_text(row.app_name))));
-        table_->setItem(
+        QTableWidgetItem* duration_item = new QTableWidgetItem(QString::fromStdString(
+            format_duration_text(row.duration_ms)));
+        duration_item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        summary_table_->setItem(row_index, 1, duration_item);
+
+        const double share = report.total_duration_ms > 0
+            ? static_cast<double>(row.duration_ms) * 100.0
+                / static_cast<double>(report.total_duration_ms)
+            : 0.0;
+        QTableWidgetItem* share_item = new QTableWidgetItem(
+            QString("%1%").arg(share, 0, 'f', 0));
+        share_item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        summary_table_->setItem(row_index, 2, share_item);
+    }
+
+    timeline_table_->setRowCount(static_cast<int>(report.timeline_rows.size()));
+
+    for (int row_index = 0; row_index < static_cast<int>(report.timeline_rows.size()); ++row_index) {
+        const ActivityTimelineEntry& row =
+            report.timeline_rows[static_cast<std::size_t>(row_index)];
+        const std::int64_t duration_ms = row.ended_at_ms - row.started_at_ms;
+
+        timeline_table_->setItem(
             row_index,
-            1,
+            0,
             new QTableWidgetItem(QString::fromStdString(
-                format_duration_text(row.duration_ms))));
+                format_timeline_range_text(row.started_at_ms, row.ended_at_ms, !today_only_))));
+        QTableWidgetItem* activity_item = new QTableWidgetItem(QString::fromStdString(
+            display_app_name_text(row.app_name)));
+        if (!row.window_title.empty()) {
+            activity_item->setToolTip(QString::fromStdString(row.window_title));
+        }
+        timeline_table_->setItem(row_index, 1, activity_item);
+
+        QTableWidgetItem* duration_item = new QTableWidgetItem(QString::fromStdString(
+            format_duration_text(duration_ms)));
+        duration_item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        timeline_table_->setItem(row_index, 2, duration_item);
     }
 }
 

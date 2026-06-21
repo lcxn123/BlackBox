@@ -160,6 +160,28 @@ int main() {
     assert(summary_rows[1].app_name == "Idle");
     assert(summary_rows[1].duration_ms == 2000);
 
+    const auto timeline_rows = load_activity_timeline_between(
+        connection,
+        3000,
+        7000);
+
+    assert(timeline_rows.size() == 3);
+    assert(timeline_rows[0].app_name == "Code.exe");
+    assert(timeline_rows[0].started_at_ms == 3000);
+    assert(timeline_rows[0].ended_at_ms == 5000);
+    assert(timeline_rows[0].window_title == "test window");
+    assert(!timeline_rows[0].idle);
+
+    assert(timeline_rows[1].app_name == "Idle");
+    assert(timeline_rows[1].started_at_ms == 4000);
+    assert(timeline_rows[1].ended_at_ms == 6000);
+    assert(timeline_rows[1].idle);
+
+    assert(timeline_rows[2].app_name == "Code.exe");
+    assert(timeline_rows[2].started_at_ms == 6000);
+    assert(timeline_rows[2].ended_at_ms == 7000);
+    assert(!timeline_rows[2].idle);
+
     close_database(connection);
     assert(connection.handle == nullptr);
 
