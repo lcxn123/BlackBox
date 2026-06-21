@@ -95,6 +95,35 @@ namespace{
     ORDER BY duration_ms DESC;
     )sql";
 
+    const std::string activity_timeline_sql = R"sql(
+    SELECT
+        started_at_ms,
+        ended_at_ms,
+        CASE
+            WHEN idle = 1 THEN 'Idle'
+            ELSE process_name
+        END AS app_name,
+        window_title,
+        idle
+    FROM activity_segments
+    ORDER BY started_at_ms ASC, id ASC;
+    )sql";
+
+    const std::string activity_timeline_between_sql = R"sql(
+    SELECT
+        MAX(started_at_ms, ?) AS started_at_ms,
+        MIN(ended_at_ms, ?) AS ended_at_ms,
+        CASE
+            WHEN idle = 1 THEN 'Idle'
+            ELSE process_name
+        END AS app_name,
+        window_title,
+        idle
+    FROM activity_segments
+    WHERE ended_at_ms > ? AND started_at_ms < ?
+    ORDER BY started_at_ms ASC, id ASC;
+    )sql";
+
     std::vector<AppUsageSummary> read_usage_summary_rows(
         DatabaseConnection& connection,
         Statement& statement)
@@ -123,6 +152,47 @@ namespace{
                 : "";
 
             row.duration_ms = sqlite3_column_int64(statement.get(), 1);
+            rows.push_back(row);
+        }
+
+        return rows;
+    }
+
+    std::vector<ActivityTimelineEntry> read_activity_timeline_rows(
+        DatabaseConnection& connection,
+        Statement& statement)
+    {
+        std::vector<ActivityTimelineEntry> rows;
+
+        while (true) {
+            const int step_result = sqlite3_step(statement.get());
+
+            if (step_result == SQLITE_DONE) {
+                break;
+            }
+
+            if (step_result != SQLITE_ROW) {
+                std::cerr << sqlite3_errmsg(connection.handle) << '\n';
+                return rows;
+            }
+
+            ActivityTimelineEntry row;
+            row.started_at_ms = sqlite3_column_int64(statement.get(), 0);
+            row.ended_at_ms = sqlite3_column_int64(statement.get(), 1);
+
+            const unsigned char* app_name_text =
+                sqlite3_column_text(statement.get(), 2);
+            row.app_name = app_name_text
+                ? reinterpret_cast<const char*>(app_name_text)
+                : "";
+
+            const unsigned char* window_title_text =
+                sqlite3_column_text(statement.get(), 3);
+            row.window_title = window_title_text
+                ? reinterpret_cast<const char*>(window_title_text)
+                : "";
+
+            row.idle = sqlite3_column_int(statement.get(), 4) != 0;
             rows.push_back(row);
         }
 
@@ -305,4 +375,73 @@ std::vector<AppUsageSummary> load_usage_summary_between(
     }
 
     return read_usage_summary_rows(connection, statement);
+}
+
+std::vector<ActivityTimelineEntry> load_activity_timeline(
+    DatabaseConnection& connection) {
+    if (connection.handle == nullptr) {
+        return {};
+    }
+
+    Statement statement;
+
+    const int prepare_result = sqlite3_prepare_v2(
+        connection.handle,
+        activity_timeline_sql.c_str(),
+        -1,
+        statement.out(),
+        nullptr);
+
+    if (prepare_result != SQLITE_OK) {
+        std::cerr << sqlite3_errmsg(connection.handle) << std::endl;
+        return {};
+    }
+
+    return read_activity_timeline_rows(connection, statement);
+}
+
+std::vector<ActivityTimelineEntry> load_activity_timeline_between(
+    DatabaseConnection& connection,
+    std::int64_t start_ms,
+    std::int64_t end_ms)
+{
+    if (connection.handle == nullptr) {
+        return {};
+    }
+
+    Statement statement;
+
+    const int prepare_result = sqlite3_prepare_v2(
+        connection.handle,
+        activity_timeline_between_sql.c_str(),
+        -1,
+        statement.out(),
+        nullptr);
+
+    if (prepare_result != SQLITE_OK) {
+        std::cerr << sqlite3_errmsg(connection.handle) << std::endl;
+        return {};
+    }
+
+    if (!sqlite_ok(connection.handle,
+            sqlite3_bind_int64(statement.get(), 1, start_ms))) {
+        return {};
+    }
+
+    if (!sqlite_ok(connection.handle,
+            sqlite3_bind_int64(statement.get(), 2, end_ms))) {
+        return {};
+    }
+
+    if (!sqlite_ok(connection.handle,
+            sqlite3_bind_int64(statement.get(), 3, start_ms))) {
+        return {};
+    }
+
+    if (!sqlite_ok(connection.handle,
+            sqlite3_bind_int64(statement.get(), 4, end_ms))) {
+        return {};
+    }
+
+    return read_activity_timeline_rows(connection, statement);
 }
