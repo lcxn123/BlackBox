@@ -1,7 +1,9 @@
 #include "gui/app_icon.h"
 #include "gui/main_window.h"
+#include "gui/main_window_style.h"
 #include "gui/settings_dialog.h"
-#include "gui/usage_report.h"
+#include "gui/usage_bar_chart.h"
+#include "reporting/usage_report.h"
 
 #include <QAction>
 #include <QApplication>
@@ -28,7 +30,8 @@
 MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
     : database_(database),
       settings_(std::move(settings)),
-      recording_controller_(settings_)
+      recording_controller_(settings_),
+      period_(ReportPeriod::Today)
 {
     setWindowTitle("BlackBox - Time Recorder");
     setWindowIcon(make_app_icon());
@@ -51,23 +54,23 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
     count_label_->setObjectName("countLabel");
 
     today_button_ = new QPushButton("Today", central);
-    all_button_ = new QPushButton("All", central);
+    week_button_ = new QPushButton("Week", central);
     refresh_button_ = new QToolButton(central);
     settings_button_ = new QToolButton(central);
     recording_button_ = new QPushButton("Resume Recording", central);
     today_button_->setObjectName("modeButton");
-    all_button_->setObjectName("modeButton");
+    week_button_->setObjectName("modeButton");
     refresh_button_->setObjectName("iconButton");
     settings_button_->setObjectName("iconButton");
     recording_button_->setObjectName("recordingButton");
-    refresh_button_->setText("⟳");
-    settings_button_->setText("⚙");
+    refresh_button_->setText(QString::fromUtf8("\xE2\x9F\xB3"));
+    settings_button_->setText(QString::fromUtf8("\xE2\x9A\x99"));
     refresh_button_->setToolTip("Refresh");
     settings_button_->setToolTip("Settings");
     refresh_button_->setFixedSize(34, 34);
     settings_button_->setFixedSize(34, 34);
     today_button_->setMinimumWidth(68);
-    all_button_->setMinimumWidth(54);
+    week_button_->setMinimumWidth(64);
     recording_button_->setMinimumWidth(136);
 
     QHBoxLayout* header_layout = new QHBoxLayout();
@@ -88,14 +91,27 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
     QHBoxLayout* action_layout = new QHBoxLayout();
     action_layout->setSpacing(8);
     action_layout->addWidget(today_button_);
-    action_layout->addWidget(all_button_);
+    action_layout->addWidget(week_button_);
 
     summary_layout->addLayout(action_layout);
 
     content_tabs_ = new QTabWidget(central);
     content_tabs_->setObjectName("contentTabs");
 
-    summary_table_ = new QTableWidget(0, 3, content_tabs_);
+    QWidget* overview_page = new QWidget(content_tabs_);
+    overview_page->setObjectName("overviewPage");
+    QVBoxLayout* overview_layout = new QVBoxLayout(overview_page);
+    overview_layout->setContentsMargins(0, 8, 0, 0);
+    overview_layout->setSpacing(10);
+
+    chart_label_ = new QLabel("Hourly activity", overview_page);
+    chart_label_->setObjectName("sectionLabel");
+    usage_chart_ = new UsageBarChart(overview_page);
+
+    QLabel* top_apps_label = new QLabel("Top apps", overview_page);
+    top_apps_label->setObjectName("sectionLabel");
+
+    summary_table_ = new QTableWidget(0, 3, overview_page);
     summary_table_->setHorizontalHeaderLabels({"Application", "Time", "Share"});
     summary_table_->horizontalHeader()->setStretchLastSection(false);
     summary_table_->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
@@ -110,6 +126,11 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
     summary_table_->setShowGrid(false);
     summary_table_->setFocusPolicy(Qt::NoFocus);
     summary_table_->setWordWrap(false);
+
+    overview_layout->addWidget(chart_label_);
+    overview_layout->addWidget(usage_chart_);
+    overview_layout->addWidget(top_apps_label);
+    overview_layout->addWidget(summary_table_);
 
     timeline_table_ = new QTableWidget(0, 3, content_tabs_);
     timeline_table_->setHorizontalHeaderLabels({"Time", "Activity", "Duration"});
@@ -127,7 +148,7 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
     timeline_table_->setFocusPolicy(Qt::NoFocus);
     timeline_table_->setWordWrap(false);
 
-    content_tabs_->addTab(summary_table_, "Overview");
+    content_tabs_->addTab(overview_page, "Overview");
     content_tabs_->addTab(timeline_table_, "Timeline");
 
     root_layout->addLayout(header_layout);
@@ -136,190 +157,13 @@ MainWindow::MainWindow(DatabaseConnection& database, AppSettings settings)
     setCentralWidget(central);
     statusBar()->setSizeGripEnabled(false);
 
-    setStyleSheet(R"qss(
-        QMainWindow {
-            background: #fafafa;
-        }
-
-        QWidget#root {
-            background: #fafafa;
-            color: #1f2937;
-            font-family: "Segoe UI";
-            font-size: 14px;
-        }
-
-        QLabel#periodLabel {
-            color: #111827;
-            font-size: 16px;
-            font-weight: 700;
-        }
-
-        QLabel#statusLabel {
-            background: #fff3e8;
-            border: none;
-            border-radius: 5px;
-            color: #9a4a12;
-            font-weight: 650;
-            padding: 6px 10px;
-        }
-
-        QLabel#statusLabel[recording="true"] {
-            background: #e8f7ee;
-            color: #166b3b;
-        }
-
-        QLabel#totalLabel {
-            background: transparent;
-            border: none;
-            padding: 2px 0;
-            font-size: 34px;
-            font-weight: 700;
-            color: #111827;
-        }
-
-        QLabel#countLabel {
-            background: transparent;
-            border: none;
-            padding: 14px 0 0 4px;
-            color: #7a8493;
-            font-size: 14px;
-            font-weight: 500;
-        }
-
-        QPushButton {
-            border: 1px solid #d9dee7;
-            border-radius: 5px;
-            background: #ffffff;
-            padding: 7px 12px;
-            min-height: 28px;
-            color: #344054;
-            font-size: 14px;
-            font-weight: 600;
-        }
-
-        QPushButton:hover {
-            background: #f9fafb;
-            border-color: #98a2b3;
-        }
-
-        QPushButton:disabled {
-            color: #98a2b3;
-            background: #f2f4f7;
-            border-color: #eaecf0;
-        }
-
-        QPushButton#recordingButton {
-            background: #1f7a4d;
-            border-color: #1f7a4d;
-            color: #ffffff;
-            font-weight: 700;
-            padding-left: 14px;
-            padding-right: 14px;
-        }
-
-        QPushButton#recordingButton[recording="true"] {
-            background: #a15c18;
-            border-color: #a15c18;
-        }
-
-        QPushButton#modeButton[selected="true"] {
-            background: #1f2937;
-            border-color: #1f2937;
-            color: #ffffff;
-            font-weight: 700;
-        }
-
-        QPushButton#modeButton[selected="false"] {
-            background: #ffffff;
-        }
-
-        QPushButton#secondaryButton {
-            color: #315c50;
-        }
-
-        QToolButton#iconButton {
-            background: transparent;
-            border: 1px solid transparent;
-            border-radius: 5px;
-            color: #475467;
-            font-size: 19px;
-            font-weight: 600;
-        }
-
-        QToolButton#iconButton:hover {
-            background: #f1f4f7;
-            border-color: #e2e7ef;
-            color: #111827;
-        }
-
-        QToolButton#iconButton:pressed {
-            background: #e8edf3;
-        }
-
-        QTabWidget#contentTabs::pane {
-            border: none;
-            background: #ffffff;
-            top: 0;
-        }
-
-        QTabBar::tab {
-            background: transparent;
-            border: none;
-            border-bottom: 2px solid transparent;
-            color: #7a8493;
-            font-size: 14px;
-            font-weight: 650;
-            min-width: 88px;
-            padding: 9px 4px 10px 4px;
-        }
-
-        QTabBar::tab:selected {
-            border-bottom-color: #111827;
-            color: #111827;
-        }
-
-        QTabBar::tab:!selected:hover {
-            color: #344054;
-        }
-
-        QTableWidget {
-            background: #ffffff;
-            alternate-background-color: #fbfbfc;
-            border: none;
-            border-radius: 0;
-            selection-background-color: #edf4ff;
-            selection-color: #111827;
-            gridline-color: transparent;
-            font-size: 15px;
-        }
-
-        QTableWidget::item {
-            padding: 9px 12px;
-            border: none;
-        }
-
-        QHeaderView::section {
-            background: #ffffff;
-            color: #8a94a3;
-            border: none;
-            border-bottom: 1px solid #edf0f4;
-            padding: 9px 12px;
-            font-size: 13px;
-            font-weight: 700;
-        }
-
-        QStatusBar {
-            background: #fafafa;
-            color: #667085;
-            padding-left: 4px;
-        }
-    )qss");
+    setStyleSheet(main_window_style_sheet());
 
     connect(today_button_, &QPushButton::clicked, this, [this] {
-        set_today_only(true);
+        set_period(ReportPeriod::Today);
     });
-    connect(all_button_, &QPushButton::clicked, this, [this] {
-        set_today_only(false);
+    connect(week_button_, &QPushButton::clicked, this, [this] {
+        set_period(ReportPeriod::Week);
     });
     connect(refresh_button_, &QToolButton::clicked, this, [this] {
         refresh();
@@ -365,14 +209,17 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 }
 
 void MainWindow::refresh(bool update_status) {
-    const UsageReport report = load_usage_report(database_, today_only_);
+    const UsageReport report = load_usage_report(database_, period_);
+    const bool showing_today = period_ == ReportPeriod::Today;
 
     if (update_status) {
         statusBar()->showMessage(
-            today_only_ ? "Showing today's usage" : "Showing all recorded usage");
+            showing_today ? "Showing today's usage" : "Showing this week's usage");
     }
 
     summary_table_->setRowCount(static_cast<int>(report.summary_rows.size()));
+    usage_chart_->set_bars(report.chart_bars);
+    chart_label_->setText(QString::fromStdString(report.chart_label));
     period_label_->setText(QString::fromStdString(report.period_label));
     total_label_->setText(QString::fromStdString(
         format_duration_text(report.total_duration_ms)));
@@ -414,7 +261,10 @@ void MainWindow::refresh(bool update_status) {
             row_index,
             0,
             new QTableWidgetItem(QString::fromStdString(
-                format_timeline_range_text(row.started_at_ms, row.ended_at_ms, !today_only_))));
+                format_timeline_range_text(
+                    row.started_at_ms,
+                    row.ended_at_ms,
+                    period_ == ReportPeriod::Week))));
         QTableWidgetItem* activity_item = new QTableWidgetItem(QString::fromStdString(
             display_app_name_text(row.app_name)));
         if (!row.window_title.empty()) {
@@ -429,20 +279,20 @@ void MainWindow::refresh(bool update_status) {
     }
 }
 
-void MainWindow::set_today_only(bool today_only) {
-    if (today_only_ == today_only) {
+void MainWindow::set_period(ReportPeriod period) {
+    if (period_ == period) {
         return;
     }
 
-    today_only_ = today_only;
+    period_ = period;
     update_mode_buttons();
     update_button_styles();
     refresh();
 }
 
 void MainWindow::update_mode_buttons() {
-    today_button_->setEnabled(!today_only_);
-    all_button_->setEnabled(today_only_);
+    today_button_->setEnabled(period_ != ReportPeriod::Today);
+    week_button_->setEnabled(period_ != ReportPeriod::Week);
 }
 
 void MainWindow::setup_refresh_timer() {
@@ -599,10 +449,10 @@ void MainWindow::update_recording_button() {
 }
 
 void MainWindow::update_button_styles() {
-    today_button_->setProperty("selected", today_only_);
-    all_button_->setProperty("selected", !today_only_);
+    today_button_->setProperty("selected", period_ == ReportPeriod::Today);
+    week_button_->setProperty("selected", period_ == ReportPeriod::Week);
 
-    for (QPushButton* button : {today_button_, all_button_}) {
+    for (QPushButton* button : {today_button_, week_button_}) {
         button->style()->unpolish(button);
         button->style()->polish(button);
     }

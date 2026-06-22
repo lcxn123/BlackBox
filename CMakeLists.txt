@@ -22,11 +22,13 @@ add_executable(blackbox_gui WIN32
     src/gui/app_icon.cpp
     src/gui/gui_main.cpp
     src/gui/main_window.cpp
+    src/gui/main_window_style.cpp
     src/gui/recording_controller.cpp
     src/gui/settings_dialog.cpp
-    src/gui/usage_report.cpp
+    src/gui/usage_bar_chart.cpp
     src/platform/windows/active_window.cpp
     src/recorder/recorder.cpp
+    src/reporting/usage_report.cpp
     src/settings/app_settings.cpp
     src/storage/database.cpp
 )
