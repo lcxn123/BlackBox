@@ -51,7 +51,7 @@ jobs:
         run: ./scripts/package-windows.ps1 -MsysBin "${{ steps.msys2.outputs.msys2-location }}\mingw64\bin"
 
       - name: Upload package artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: blackbox-windows-x64
           path: dist/blackbox-windows-x64.zip
